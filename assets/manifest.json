@@ -1,6 +1,6 @@
 {
-  "name": "egui Template PWA",
-  "short_name": "egui-template-pwa",
+  "name": "Aetherweave PWA",
+  "short_name": "aetherweave-pwa",
   "icons": [
     {
       "src": "./assets/icon-256.png",

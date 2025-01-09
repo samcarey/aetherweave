@@ -50,7 +50,7 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|cc| Ok(Box::new(aetherweave::TemplateApp::new(cc)))),
+                Box::new(|cc| Ok(Box::new(aetherweave::App::new(cc)))),
             )
             .await;
 

@@ -164,7 +164,7 @@ impl eframe::App for App {
                         color,
                     );
                     if let Some(click) = click {
-                        if (center - click).length() < body_radius {
+                        if (center - click).length() < body_radius + 5. {
                             self.selected = Rc::downgrade(body_rc);
                             clicked_on_body = true;
                         }

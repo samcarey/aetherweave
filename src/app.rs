@@ -1,4 +1,5 @@
 use egui::{vec2, Align2, Color32, FontId, Margin, Rect, Rounding, Stroke, Ui, Vec2};
+use egui_plot::{CoordinatesFormatter, Corner, Plot, PlotPoint, PlotPoints, Points};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -75,70 +76,46 @@ impl eframe::App for App {
         egui::CentralPanel::default()
             .frame(egui::containers::Frame::default().inner_margin(Margin::ZERO))
             .show(ctx, |ui| {
-                let rect = ui.available_rect_before_wrap();
-                let screen_center = rect.center();
                 let body_radius = 10.;
-                const MARGIN: f32 = 8.0;
-                self.view = None;
-                if self.view.is_none() {
-                    let min_x_phys = self
-                        .bodies
-                        .iter()
-                        .map(|b| b.position.x)
-                        .fold(f32::INFINITY, |a, b| a.min(b));
-                    let max_x_phys = self
-                        .bodies
-                        .iter()
-                        .map(|b| b.position.x)
-                        .fold(f32::NEG_INFINITY, |a, b| a.max(b));
-                    let min_y_phys = self
-                        .bodies
-                        .iter()
-                        .map(|b| b.position.y)
-                        .fold(f32::INFINITY, |a, b| a.min(b));
-                    let max_y_phys = self
-                        .bodies
-                        .iter()
-                        .map(|b| b.position.y)
-                        .fold(f32::NEG_INFINITY, |a, b| a.max(b));
-                    let mid_x_phys = (max_x_phys + min_x_phys) / 2.;
-                    let mid_y_phys = (max_y_phys + min_y_phys) / 2.;
-                    let span_x_phys = max_x_phys - min_x_phys;
-                    let span_y_phys = max_y_phys - min_y_phys;
-                    let allowed_centers = rect.shrink(body_radius + MARGIN);
-                    let x_scale = allowed_centers.width() / span_x_phys;
-                    let y_scale = allowed_centers.height() / span_y_phys;
-                    let scale = x_scale.min(y_scale);
-                    self.view = Some(View {
-                        center: vec2(mid_x_phys * scale, mid_y_phys * scale),
-                        scale,
+                let plot = Plot::new("main_plot")
+                    .show_grid(false)
+                    .show_axes(false)
+                    .coordinates_formatter(
+                        Corner::LeftBottom,
+                        CoordinatesFormatter::new(|_, _| "".to_string()),
+                    )
+                    .cursor_color(Color32::TRANSPARENT)
+                    .show(ui, |ui| {
+                        for Body {
+                            name,
+                            position,
+                            color,
+                            ..
+                        } in &self.bodies
+                        {
+                            ui.add(
+                                Points::new(PlotPoints::new(vec![[
+                                    position.x as f64,
+                                    position.y as f64,
+                                ]]))
+                                .color(*color)
+                                .radius(body_radius)
+                                .name(name),
+                            );
+                        }
                     });
-                }
-                // let shown_centers = rect.expand(body_radius);
-                let view = self.view.clone().unwrap();
-                for Body {
-                    name,
-                    // mass_kg,
-                    position,
-                    color,
-                    ..
-                } in &self.bodies
-                {
-                    let mut offset = *position * view.scale - view.center;
-                    offset.y = -offset.y;
-                    let view_pos = screen_center + offset;
+                let transform = plot.transform;
+                let painter = ui.painter();
+                for Body { name, position, .. } in &self.bodies {
+                    let center = transform
+                        .position_from_point(&PlotPoint::new(position.x as f64, position.y as f64));
+                    painter.circle_stroke(center, body_radius, Stroke::new(1., Color32::GREEN));
                     ui.painter().text(
-                        view_pos - vec2(0., body_radius),
+                        center - vec2(0., body_radius),
                         Align2::CENTER_BOTTOM,
                         name,
                         FontId::proportional(10.),
                         Color32::LIGHT_GRAY,
-                    );
-                    ui.painter().circle(
-                        view_pos,
-                        body_radius,
-                        *color,
-                        Stroke::new(1., color.lighten(0.5)),
                     );
                 }
             });

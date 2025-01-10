@@ -127,7 +127,7 @@ impl eframe::App for App {
                                         .map(|rad| [radius * rad.cos(), radius * rad.sin()])
                                         .collect::<Vec<_>>(),
                                 ))
-                                .style(LineStyle::Dotted { spacing: 2. })
+                                .style(LineStyle::Dotted { spacing: 4. })
                                 .color(*color)
                                 .width(0.5),
                             );

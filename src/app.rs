@@ -1,6 +1,6 @@
 use egui::{
     vec2, Align2, Color32, Event, FontId, Grid, Id, Margin, PointerButton, Pos2, Rect, RichText,
-    Rounding, Stroke, Ui, Vec2, Window,
+    Rounding, Stroke, Theme, Ui, Vec2, Window,
 };
 use egui_plot::{Line, LineStyle, Plot, PlotPoint, PlotPoints, Points};
 use std::rc::{Rc, Weak};
@@ -74,6 +74,7 @@ impl Default for App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        cc.egui_ctx.set_theme(Theme::Dark);
         if let Some(storage) = cc.storage {
             return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
         }

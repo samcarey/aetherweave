@@ -4,14 +4,17 @@ use egui::{
 };
 use egui_plot::{Line, LineStyle, Plot, PlotPoint, PlotPoints, Points};
 use std::rc::{Rc, Weak};
+use std::time::Instant;
 
 #[derive(serde::Deserialize, serde::Serialize)]
-#[serde(default)] // if we add new fields, give them default values when deserializing old state
+#[serde(default)]
 pub struct App {
     #[serde(skip)]
     view: Option<View>,
     #[serde(skip)]
     bodies: Vec<Rc<Body>>,
+    #[serde(skip)]
+    last_update: Option<Instant>,
     selected: Weak<Body>,
 }
 
@@ -21,14 +24,22 @@ struct View {
     scale: f32,
 }
 
+// Need interior mutability for the Rc<Body>
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Body {
     name: String,
     mass_kg: f32,
-    position: Vec2,
+    #[serde(skip)]
+    position: std::cell::Cell<Vec2>,
     color: Color32,
-    velocity: Vec2,
+    #[serde(skip)]
+    velocity: std::cell::Cell<Vec2>,
 }
+
+const G: f32 = 6.67430e-11; // gravitational constant
+const EARTH_MASS_KG: f32 = 5.97219e24;
+const SECONDS_PER_MINUTE: f32 = 60.0;
+const SIMULATION_SPEED: f32 = 60.0 * 24.0 * 365.0; // 1 Earth year per minute
 
 impl Body {
     fn orbiting(
@@ -40,17 +51,36 @@ impl Body {
     ) -> Rc<Self> {
         let radius = orbital_radius_km * 1e3;
         let radians = degrees.to_radians();
+        let position = vec2(radius * radians.cos(), radius * radians.sin());
+        
+        // Calculate orbital velocity using v = sqrt(GM/r)
+        let sun_mass = 1.9891e30;
+        let velocity_magnitude = (G * sun_mass / radius).sqrt();
+        
+        // Velocity vector perpendicular to position vector for circular orbit
+        let velocity = vec2(
+            -velocity_magnitude * radians.sin(),
+            velocity_magnitude * radians.cos(),
+        );
+
         Rc::new(Self {
             name: name.to_string(),
             mass_kg,
-            position: vec2(radius * radians.cos(), radius * radians.sin()),
+            position: std::cell::Cell::new(position),
             color,
-            velocity: Vec2::ZERO,
+            velocity: std::cell::Cell::new(velocity),
         })
     }
-}
 
-const EARTH_MASS_KG: f32 = 5.97219e24;
+    fn update_position(&self, dt: f32) {
+        let current_pos = self.position.get();
+        let current_vel = self.velocity.get();
+        
+        // Update position based on velocity
+        let new_pos = current_pos + current_vel * dt;
+        self.position.set(new_pos);
+    }
+}
 
 impl Default for App {
     fn default() -> Self {
@@ -67,6 +97,7 @@ impl Default for App {
                 Body::orbiting("Neptune", 1.024e26, 4.495e9, Color32::BLUE, 15.),
             ],
             view: None,
+            last_update: None,
             selected: Default::default(),
         }
     }
@@ -78,7 +109,6 @@ impl App {
         if let Some(storage) = cc.storage {
             return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
         }
-
         Default::default()
     }
 }
@@ -89,6 +119,23 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Update positions
+        let now = Instant::now();
+        if let Some(last_update) = self.last_update {
+            let dt = now.duration_since(last_update).as_secs_f32();
+            // Apply simulation speed scaling
+            let scaled_dt = dt * SIMULATION_SPEED;
+            
+            // Update all bodies except the Sun (index 0)
+            for body in self.bodies.iter().skip(1) {
+                body.update_position(scaled_dt);
+            }
+        }
+        self.last_update = Some(now);
+        
+        // Request continuous updates
+        ctx.request_repaint();
+
         egui::CentralPanel::default()
             .frame(egui::containers::Frame::default().inner_margin(Margin::ZERO))
             .show(ctx, |ui| {
@@ -101,22 +148,17 @@ impl eframe::App for App {
                     .label_formatter(|_, _| "".to_string())
                     .cursor_color(Color32::TRANSPARENT)
                     .show(ui, |ui| {
-                        for Body {
-                            name,
-                            position,
-                            color,
-                            ..
-                        } in self.bodies.iter().map(|rc| &**rc)
-                        {
+                        for body in self.bodies.iter() {
+                            let position = body.position.get();
                             ui.add(
                                 Points::new(PlotPoints::new(vec![[
                                     position.x as f64,
                                     position.y as f64,
                                 ]]))
-                                .color(*color)
+                                .color(body.color)
                                 .radius(body_radius)
-                                .name(name)
-                                .id(Id::new(name)),
+                                .name(&body.name)
+                                .id(Id::new(&body.name)),
                             );
                             let radius = position.length() as f64;
                             ui.add(
@@ -128,7 +170,7 @@ impl eframe::App for App {
                                         .collect::<Vec<_>>(),
                                 ))
                                 .style(LineStyle::Dotted { spacing: 4. })
-                                .color(*color)
+                                .color(body.color)
                                 .width(0.5),
                             );
                         }
@@ -141,7 +183,7 @@ impl eframe::App for App {
                         .upgrade()
                         .map(|selected| Rc::ptr_eq(&selected, &body_rc))
                         .unwrap_or_default();
-                    let Body { name, position, .. } = &**body_rc;
+                    let position = body_rc.position.get();
                     let center = plot
                         .transform
                         .position_from_point(&PlotPoint::new(position.x as f64, position.y as f64));
@@ -159,7 +201,7 @@ impl eframe::App for App {
                     ui.painter().text(
                         center + vec2(body_radius + HIGHLIGHT_RADIUS + 3., -1.),
                         Align2::LEFT_CENTER,
-                        name,
+                        &body_rc.name,
                         FontId::proportional(if highlighted { 16. } else { 12. }),
                         color,
                     );
@@ -174,17 +216,12 @@ impl eframe::App for App {
                     self.selected = Default::default();
                 }
             });
+
         if let Some(body) = self.selected.upgrade() {
-            let Body {
-                name,
-                mass_kg,
-                color,
-                ..
-            } = &*body;
-            Window::new(name)
+            Window::new(&body.name)
                 .frame(
                     egui::containers::Frame::window(&ctx.style())
-                        .stroke(Stroke::new(ctx.style().visuals.window_stroke.width, *color)), // .fill(color.lerp_to_gamma(Color32::BLACK, 0.5)), // .inner_margin(Margin::ZERO), // .multiply_with_opacity(0.8),
+                        .stroke(Stroke::new(ctx.style().visuals.window_stroke.width, body.color)),
                 )
                 .anchor(Align2::CENTER_TOP, [0., 10.])
                 .collapsible(false)
@@ -192,14 +229,20 @@ impl eframe::App for App {
                 .show(ctx, |ui| {
                     Grid::new("stats").show(ui, |ui| {
                         ui.label(RichText::new("Mass:"));
-                        let earth_masses = mass_kg / EARTH_MASS_KG;
-                        ui.label(RichText::new(format!("{earth_masses:.1} x Earth")).monospace())
+                        let earth_masses = body.mass_kg / EARTH_MASS_KG;
+                        ui.label(RichText::new(format!("{earth_masses:.1} x Earth")).monospace());
+                        
+                        ui.label(RichText::new("Velocity:"));
+                        let velocity = body.velocity.get();
+                        let speed_kms = velocity.length() / 1000.0;
+                        ui.label(RichText::new(format!("{speed_kms:.1} km/s")).monospace());
                     });
                 });
         }
     }
 }
 
+// Rest of the UiExt implementation remains the same...
 #[allow(unused)]
 trait UiExt {
     fn debug_rect(&mut self, rect: Rect);
